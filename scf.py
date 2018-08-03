@@ -26,16 +26,21 @@ def read(file):
 		for y in content:
 			y = y.split('\t')
 			y[-1] = y[-1].replace('\n','')
-			y = [float(x) for x in y]
+			#y = [int(y[x]) for x in range(len(y)-1)]
+			y[0] = int(y[0])
+			y[1] = int(y[1])
+			y[2] = int(y[2])
+			y[3] = int(y[3])
+			y[4] = float(y[4])
 
-			contOut[int(y[0])-1][int(y[1])-1][int(y[2])-1][int(y[3])-1] = y[4]
-			contOut[int(y[1])-1][int(y[0])-1][int(y[2])-1][int(y[3])-1] = y[4]
-			contOut[int(y[0])-1][int(y[1])-1][int(y[3])-1][int(y[2])-1] = y[4]
-			contOut[int(y[1])-1][int(y[0])-1][int(y[3])-1][int(y[2])-1] = y[4]
-			contOut[int(y[2])-1][int(y[3])-1][int(y[0])-1][int(y[1])-1] = y[4]
-			contOut[int(y[3])-1][int(y[2])-1][int(y[0])-1][int(y[1])-1] = y[4]
-			contOut[int(y[2])-1][int(y[3])-1][int(y[1])-1][int(y[0])-1] = y[4]
-			contOut[int(y[3])-1][int(y[2])-1][int(y[1])-1][int(y[0])-1] = y[4]
+			contOut[y[0]-1][y[1]-1][y[2]-1][y[3]-1] = y[4]
+			contOut[y[1]-1][y[0]-1][y[2]-1][y[3]-1] = y[4]
+			contOut[y[0]-1][y[1]-1][y[3]-1][y[2]-1] = y[4]
+			contOut[y[1]-1][y[0]-1][y[3]-1][y[2]-1] = y[4]
+			contOut[y[2]-1][y[3]-1][y[0]-1][y[1]-1] = y[4]
+			contOut[y[3]-1][y[2]-1][y[0]-1][y[1]-1] = y[4]
+			contOut[y[2]-1][y[3]-1][y[1]-1][y[0]-1] = y[4]
+			contOut[y[3]-1][y[2]-1][y[1]-1][y[0]-1] = y[4]
 		
 		return contOut
 
@@ -79,7 +84,7 @@ def P(C):
 
 	for mu in range(len(C)):
 		for nu in range(len(C)):
-			for m in range(5):
+			for m in range(5):								#change to einsum
 				P_mat[mu][nu] += C[mu][m]*C[nu][m]			#Sums only over the occupied orbitals
 
 	return P_mat	
@@ -97,25 +102,45 @@ def F_new(H_core,D,rep):
 	return Fock
 
 
-def coef(F, S_invsqrt):
+def enCoef(F, S_invsqrt):
 
 	e_o,c_o = npl.eigh(F)
-	C = np.matmul(S_invsqrt,c_o)
+	C_mo = np.matmul(S_invsqrt,c_o)
 
-	return C
+	return e_o, C_mo
 
+def MP2(rep, E_mo, C_mo):
+	"""
+	rep_ao = np.einsum('ip,jq,ijkl,kr,ls->pqrs', C_mo,C_mo,rep,C_mo,C_mo)
+	
+	#This is equivalent to the noddy algorithm - simple but about 5 times slower than the blow algorithm for water with STO-3G
+	"""
+	rep_ao = np.einsum('ijkl,ls->ijks', rep, C_mo)
+	rep_ao = np.einsum('ijks,kr->ijrs', rep_ao, C_mo)
+	rep_ao = np.einsum('ijrs,jq->iqrs', rep_ao, C_mo)
+	rep_ao = np.einsum('iqrs,ip->pqrs', rep_ao, C_mo)
+	
+
+	E_mp2 = 0
+
+	for i in range(5):
+		for j in range(5):
+			for a in range(5,len(E_mo)):
+				for b in range(5,len(E_mo)):
+
+					E_mp2 += rep_ao[i][a][j][b] * (2*rep_ao[i][a][j][b]-rep_ao[i][b][j][a]) / (E_mo[i] + E_mo[j] - E_mo[a] - E_mo[b])
+
+	return E_mp2
 
 def main():
 	enuc = read("enuc")
 	H_core = read("kinetic") + read("nucAtr")
 	rep = read("eri")
 	S_invsqrt = orthMat(read("overlap"))
-
-	coef.__defaults__ = ([],)
 	
 	Fock = orthogonalize(H_core,S_invsqrt)
-	Coef = coef(Fock,S_invsqrt)
-	Den = P(Coef)
+	E_ao, C_mo = enCoef(Fock,S_invsqrt)
+	Den = P(C_mo)
 	En_e = energy(H_core,H_core,Den)
 	E_old = 0.0
 
@@ -125,11 +150,11 @@ def main():
 
 		Fock = F_new(H_core,Den,rep)
 		F_orth = orthogonalize(Fock,S_invsqrt)
-		Coef = coef(F_orth,S_invsqrt)
-		Den = P(Coef)
+		E_ao, C_mo = enCoef(F_orth,S_invsqrt)
+		Den = P(C_mo)
 		En_e = energy(H_core,Fock,Den)
-		print(En_e)
 
+	MP2(rep, E_ao, C_mo)
 
 	return None
 
